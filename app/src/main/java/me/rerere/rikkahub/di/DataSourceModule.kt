@@ -290,4 +290,38 @@ val dataSourceModule = module {
     single<RikkaHubAPI> {
         get<Retrofit>().create(RikkaHubAPI::class.java)
     }
+
+    // 日历 + 推送
+    single {
+        me.rerere.rikkahub.data.calendar.CalendarStore(context = get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.calendar.DiaryChatGenerator(
+            providerManager = get(),
+            json = get(),
+            calendarStore = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.calendar.PushMessageGenerator(
+            providerManager = get(),
+            json = get(),
+            calendarStore = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.utils.PushScheduler(context = get())
+    }
+
+    single {
+        me.rerere.rikkahub.service.PushNotificationManager(
+            application = get(),
+            calendarStore = get(),
+            settingsStore = get(),
+            pushMessageGenerator = get(),
+        )
+    }
 }

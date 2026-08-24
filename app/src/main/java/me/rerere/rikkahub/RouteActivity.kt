@@ -123,6 +123,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
+import me.rerere.rikkahub.ui.pages.calendar.CalendarPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
@@ -232,6 +233,14 @@ class RouteActivity : ComponentActivity() {
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
         }
+        handlePushNavigation(intent)
+    }
+
+    /** 点推送通知进来时跳到日历页 */
+    private fun handlePushNavigation(intent: Intent) {
+        if (intent.getStringExtra("navigate_to") == "calendar") {
+            navStack?.add(Screen.Calendar)
+        }
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
@@ -268,6 +277,15 @@ class RouteActivity : ComponentActivity() {
 
         val backStack = rememberNavBackStack(startScreen)
         SideEffect { this@RouteActivity.navStack = backStack }
+
+        // 冷启动点推送通知进来：onNewIntent 不会触发，必须在这里补一次。
+        // 放在 backStack 就绪之后，否则 navStack 还是 null，跳转会被静默丢掉。
+        LaunchedEffect(Unit) {
+            if (intent?.getStringExtra("navigate_to") == "calendar") {
+                backStack.add(Screen.Calendar)
+                intent.removeExtra("navigate_to") // 防止重建时重复入栈
+            }
+        }
 
         ShareHandler(backStack)
 
@@ -530,6 +548,10 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Stats> {
                                 StatsPage()
                             }
+
+                            entry<Screen.Calendar> {
+                                CalendarPage()
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -732,4 +754,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Stats : Screen
+
+    @Serializable
+    data object Calendar : Screen
 }

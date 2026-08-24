@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+> Working on a local checkout? Read `_local/AGENTS.md` first if it exists
+> (local-only notes, not tracked in git).
+
 ## Project Overview
 
 RikkaHub is a native Android LLM chat client that supports switching between different AI providers

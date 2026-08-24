@@ -46,6 +46,8 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val PUSH_NOTIFICATION_CHANNEL_ID = "calendar_push"
+const val PUSH_GENERATION_NOTIFICATION_CHANNEL_ID = "push_generation"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -57,6 +59,9 @@ class RikkaHubApp : Application() {
             modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
         }
         this.createNotificationChannel()
+
+        // 兜底补排推送闹钟（一次性闹钟可能已丢失）
+        this.rearmPushAlarms()
 
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
@@ -221,6 +226,43 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        val pushChannel = NotificationChannelCompat
+            .Builder(PUSH_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
+            .setName("日历推送")
+            .setDescription("定时推送消息")
+            .setVibrationEnabled(true)
+            .build()
+        notificationManager.createNotificationChannel(pushChannel)
+
+        val pushGenerationChannel = NotificationChannelCompat
+            .Builder(PUSH_GENERATION_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName("推送生成")
+            .setDescription("正在生成推送消息")
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(pushGenerationChannel)
+    }
+
+    /**
+     * 兜底补排推送闹钟。
+     *
+     * setExactAndAllowWhileIdle 是一次性闹钟，可能因强停、ROM 清理、崩溃而丢失。
+     * rescheduleAll 会先取消再重排，已经排好的不会变成两个。
+     */
+    private fun rearmPushAlarms() {
+        get<AppScope>().launch {
+            runCatching {
+                val pushSettings = get<me.rerere.rikkahub.data.calendar.CalendarStore>().getPushSettings()
+                if (pushSettings.enabled) {
+                    get<me.rerere.rikkahub.utils.PushScheduler>().rescheduleAll(pushSettings.pushTimes)
+                    Log.i(TAG, "Push alarms re-armed on app start")
+                }
+            }.onFailure {
+                Log.e(TAG, "Failed to re-arm push alarms on app start", it)
+            }
+        }
     }
 
     override fun onTerminate() {

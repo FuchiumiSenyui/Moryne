@@ -11,3 +11,11 @@ local.properties
 .cursor
 .history
 .kotlin
+
+# 本地私有工作文档，绝不提交（这个仓库是公开的）
+/_local/
+
+# 签名与密钥，绝不提交
+*.keystore
+*.jks
+google-services.json

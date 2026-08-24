@@ -404,6 +404,19 @@ fun ChatDrawerContent(
                     },
                 )
 
+                DrawerAction(
+                    icon = {
+                        // 不用 Icon：本地可用的图标和 CI 上不一致，加图标容易在 CI 挂
+                        Text("历")
+                    },
+                    label = {
+                        Text("日历")
+                    },
+                    onClick = {
+                        navController.navigate(Screen.Calendar)
+                    },
+                )
+
                 Spacer(Modifier.weight(1f))
 
                 DrawerAction(

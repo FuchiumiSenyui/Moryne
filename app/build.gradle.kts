@@ -9,8 +9,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.google.services)
-    alias(libs.plugins.firebase.crashlytics)
+    // Firebase 已移除：不需要统计，且上游 CI 靠 secrets 注入 google-services.json，本仓库没有
     alias(libs.plugins.baselineprofile)
 }
 
@@ -19,11 +18,13 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub"
+        // 只改 applicationId（决定装机身份，避免跟上游正版顶掉）；
+        // namespace 保持不变，它是 R 类/BuildConfig 的包名，改了要动全项目上千处 import
+        applicationId = "com.moryne.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 179
-        versionName = "2.4.12"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -166,10 +167,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(libs.androidx.material3.adaptive.navigation3)
 
-    // Firebase
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.crashlytics)
+    // Firebase 已移除（见 plugins 块注释）
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)

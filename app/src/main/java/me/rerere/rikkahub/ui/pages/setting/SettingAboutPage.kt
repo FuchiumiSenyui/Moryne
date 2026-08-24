@@ -121,7 +121,7 @@ fun SettingAboutPage() {
                         )
 
                         Text(
-                            text = "RikkaHub",
+                            text = "Moryne",
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }

@@ -9,7 +9,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.handleMessageChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.rikkahub.data.ai.tools.buildCalendarTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -54,13 +54,14 @@ class DiaryChatGenerator(
         var reply = ""
 
         val tools = buildCalendarTools(json, calendarStore)
+        val streamChunkHandler = StreamChunkHandler(model)
         repeat(MAX_TOOL_STEPS) {
             providerHandler.streamText(
                 providerSetting = provider,
                 messages = messages,
                 params = TextGenerationParams(model = model, tools = tools),
             ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk)
+                messages = streamChunkHandler.handle(messages, chunk)
                 val text = sanitize(messages.lastOrNull()?.toText() ?: "")
                 if (text.isNotBlank() && text != reply) {
                     reply = text

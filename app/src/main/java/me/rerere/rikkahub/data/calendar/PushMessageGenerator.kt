@@ -9,7 +9,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.handleMessageChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.rikkahub.data.ai.tools.buildCalendarTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -66,6 +66,7 @@ class PushMessageGenerator(
 
         // 推送场景强制只读：写入动作会绕过推送防重，导致同一条推送重复进日历
         val tools = buildCalendarTools(json, calendarStore, readOnly = true)
+        val streamChunkHandler = StreamChunkHandler(model)
 
         repeat(MAX_TOOL_STEPS) {
             providerHandler.streamText(
@@ -73,7 +74,7 @@ class PushMessageGenerator(
                 messages = messages,
                 params = TextGenerationParams(model = model, tools = tools),
             ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk)
+                messages = streamChunkHandler.handle(messages, chunk)
                 val text = sanitize(messages.lastOrNull()?.toText() ?: "")
                 if (text.isNotBlank() && text != reply) {
                     reply = text

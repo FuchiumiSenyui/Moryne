@@ -326,34 +326,56 @@ class CalendarVM(
         return annotations
     }
 
-    // 获取纪念日数据（所有预设纪念日，可逐条切正数日/倒计时）
+    /**
+     * 纪念日数据。
+     *
+     * 没有任何硬编码的预设日期——纪念日全部来自使用者自己在日历里加的标注，
+     * 按日期排序展示，每条可单独切「正数日 / 倒计时」。
+     */
     fun getCountdownData(): List<CountdownInfo> {
         val data = _calendarData.value
-        return SpecialDate.PRESETS.map { specialDate ->
-            val daysUntil = specialDate.daysUntilNextAnniversary()
-            val nextDate = specialDate.nextAnniversary()
-            // 周年数按「下一个纪念日」所在年份算，否则今年月日还没到时会多算一年
-            val anniversary = specialDate.anniversaryCount(nextDate)
+        return data.customAnnotations
+            .mapNotNull { (dateKey, annotation) ->
+                val date = runCatching { LocalDate.parse(dateKey) }.getOrNull()
+                    ?: return@mapNotNull null
+                if (annotation.title.isBlank()) return@mapNotNull null
 
-            CountdownInfo(
-                date = specialDate.date,
-                title = specialDate.title,
-                note = specialDate.note,
-                daysUntil = daysUntil,
-                daysSince = specialDate.daysSince(),
-                anniversary = anniversary,
-                nextDate = nextDate,
-                isToday = daysUntil == 0L,
-                isCountdown = data.isCountdownMode(specialDate),
-            )
-        }
+                // 复用 SpecialDate 的日期计算，标注本身不参与存储
+                val asSpecial = SpecialDate(
+                    date = dateKey,
+                    title = annotation.title,
+                    note = annotation.note,
+                    isCountdown = annotation.isCountdown,
+                )
+                val daysUntil = asSpecial.daysUntilNextAnniversary()
+                val nextDate = asSpecial.nextAnniversary()
+                // 周年数按「下一个纪念日」所在年份算，否则今年月日还没到时会多算一年
+                val anniversary = asSpecial.anniversaryCount(nextDate)
+
+                CountdownInfo(
+                    date = dateKey,
+                    title = annotation.title,
+                    note = annotation.note,
+                    daysUntil = daysUntil,
+                    daysSince = asSpecial.daysSince(),
+                    anniversary = anniversary,
+                    nextDate = nextDate,
+                    isToday = daysUntil == 0L,
+                    isCountdown = data.countdownModes[dateKey] ?: annotation.isCountdown,
+                )
+            }
+            .sortedBy { it.date }
     }
 
     /** 切换某个纪念日的展示模式（正数日 / 倒计时），落盘 */
     fun toggleCountdownMode(date: String) {
         viewModelScope.launch {
-            val specialDate = SpecialDate.PRESETS.find { it.date == date } ?: return@launch
-            val newData = _calendarData.value.toggleCountdownMode(specialDate)
+            val current = _calendarData.value
+            val annotation = current.customAnnotations[date] ?: return@launch
+            val now = current.countdownModes[date] ?: annotation.isCountdown
+            val newData = current.copy(
+                countdownModes = current.countdownModes + (date to !now)
+            )
             _calendarData.value = newData
             calendarStore.saveCalendarData(newData)
         }

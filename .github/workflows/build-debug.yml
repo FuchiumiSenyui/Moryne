@@ -1,0 +1,66 @@
+name: Build Debug APK
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 发布 Release 需要写权限
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # web 模块的 preBuild 会执行 pnpm run build 构建前端
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      # debug 构建用 Android 自动生成的 debug keystore，不需要任何 secret
+      - name: Gradle Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Publish debug APK
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: debug-latest       # 固定 tag，每次覆盖，下载地址不变
+          name: Debug Build
+          prerelease: true
+          body: |
+            调试构建（commit `${{ github.sha }}`）
+
+            > 仅供测试。正式交付用 release 包。
+          files: app/build/outputs/apk/debug/*arm64*.apk

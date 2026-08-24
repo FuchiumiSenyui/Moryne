@@ -1,10 +1,9 @@
 name: Daily Build
 
 on:
-  # 每天 UTC 18:00 触发（北京时间次日 02:00），可按需修改
-  schedule:
-    - cron: '0 18 * * *'
-  # 也支持手动触发
+  # 定时构建已关闭：这个 workflow 需要 KEY_BASE64 / SIGNING_CONFIG /
+  # GOOGLE_SERVICES_JSON 三个 secret，本仓库没有配，开着只会每晚红一次。
+  # 日常构建走 build-debug.yml。等配好签名密钥再考虑恢复。
   workflow_dispatch:
 
 jobs:

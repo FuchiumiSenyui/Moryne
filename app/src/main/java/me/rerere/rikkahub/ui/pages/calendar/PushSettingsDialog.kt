@@ -45,6 +45,11 @@ fun PushSettingsDialog(
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var editingTimeIndex by remember { mutableIntStateOf(-1) }
 
+    // 固定文案模式下必须至少有一条非空文案，否则存下来就是「模式=固定文案 + 列表为空」
+    // 这种自相矛盾的状态，等闹钟响了只能弹一条「文案列表是空的」失败通知。
+    val fixedTextsInvalid = contentSource == PushContentSource.FIXED_TEXT &&
+        fixedTexts.none { it.isNotBlank() }
+
     // 检查权限状态
     val hasNotification = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
         NotificationUtil.hasNotificationPermission(context)
@@ -215,9 +220,9 @@ fun PushSettingsDialog(
                         Text("+ 添加一条文案")
                     }
 
-                    if (fixedTexts.none { it.isNotBlank() }) {
+                    if (fixedTextsInvalid) {
                         Text(
-                            text = "还没有任何文案。推送时间到了会发一条提醒你来填。",
+                            text = "至少要有一条非空文案才能保存。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -379,17 +384,20 @@ fun PushSettingsDialog(
                         notificationPlaceholder = notificationPlaceholder,
                     )
                     onSave(newSettings)
-                    
-                    // 更新推送调度
+
+                    // 更新推送调度。
+                    // 这是「用户主动保存」这一条路，允许先取消再重排；
+                    // allowToday=false 保留 2 分钟安全边距，避免设的时间≈当前时间导致立即触发。
                     if (enabled && hasAllPermissions) {
-                        pushScheduler.rescheduleAll(pushTimes)
+                        pushScheduler.rescheduleAll(pushTimes, allowToday = false)
                     } else {
                         // 关闭推送，取消所有闹钟
                         pushScheduler.rescheduleAll(emptyList())
                     }
                     
                     onDismiss()
-                }
+                },
+                enabled = !fixedTextsInvalid,
             ) {
                 Text("保存")
             }

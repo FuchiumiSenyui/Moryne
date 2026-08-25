@@ -88,21 +88,30 @@ data class PushTime(
     val hour: Int,    // 0-23
     val minute: Int,  // 0-59
 ) {
-    /** 转为下一次该触发的时间戳（毫秒） */
-    fun toTodayMillis(): Long {
-        val now = java.time.LocalDateTime.now()
-        val today = now.toLocalDate()
-        val targetTime = java.time.LocalTime.of(hour, minute)
-        var targetDateTime = java.time.LocalDateTime.of(today, targetTime)
+    /** 今天这个时刻的 LocalDateTime */
+    fun toTodayDateTime(): java.time.LocalDateTime =
+        java.time.LocalDateTime.of(java.time.LocalDate.now(), java.time.LocalTime.of(hour, minute))
 
-        // 如果目标时间已经过了，或距离当前时间不足 2 分钟（避免临界触发），推到明天
-        val minDelayMinutes = 2L
-        val safeThreshold = now.plusMinutes(minDelayMinutes)
-        if (targetDateTime.isBefore(safeThreshold)) {
-            targetDateTime = targetDateTime.plusDays(1)
+    /**
+     * 下一次触发的时间戳（毫秒）。
+     *
+     * @param allowToday
+     *   true（兜底补排 / 响完续订）：只要今天这个时刻还没过就排今天，不留边距。
+     *   false（用户在设置里手动保存）：留 2 分钟安全边距，避免设置的时间≈当前时间导致立即触发。
+     *
+     *   边距只该用在「用户刚手动设了个时间」这一种场合。用在每次进程启动的补排上会反向咬人：
+     *   在推送前 2 分钟内启动过一次 App，今天这一次就被顺延到明天了。
+     */
+    fun nextTriggerMillis(allowToday: Boolean = true): Long {
+        val now = java.time.LocalDateTime.now()
+        var target = toTodayDateTime()
+
+        val threshold = if (allowToday) now else now.plusMinutes(2)
+        if (!target.isAfter(threshold)) {
+            target = target.plusDays(1)
         }
 
-        return targetDateTime.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return target.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 
     override fun toString(): String = String.format("%02d:%02d", hour, minute)

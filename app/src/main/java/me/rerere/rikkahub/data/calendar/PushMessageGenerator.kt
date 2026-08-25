@@ -36,6 +36,7 @@ class PushMessageGenerator(
      * @param date 推送日期
      * @param scheduledTime 原定推送时间
      * @param actualTime 实际推送时间（第二阶段支持延迟）
+     * @param isCatchUp 是否为补做（闹钟丢失后补发），决定怎么向模型解释延迟原因
      * @param fallbackModelId 当推送未指定模型时使用的模型
      */
     fun generatePushMessage(
@@ -44,6 +45,7 @@ class PushMessageGenerator(
         date: LocalDate,
         scheduledTime: LocalDateTime,
         actualTime: LocalDateTime = scheduledTime,
+        isCatchUp: Boolean = false,
         fallbackModelId: kotlin.uuid.Uuid?,
     ): Flow<String> = flow {
         // 推送复用日历对话的模型配置
@@ -61,7 +63,7 @@ class PushMessageGenerator(
         val calendarData = calendarStore.getCalendarData()
         val dayData = calendarData.getDay(date)
 
-        var messages = buildMessages(pushSettings, dayData, scheduledTime, actualTime)
+        var messages = buildMessages(pushSettings, dayData, scheduledTime, actualTime, isCatchUp)
         var reply = ""
 
         // 推送场景强制只读：写入动作会绕过推送防重，导致同一条推送重复进日历
@@ -112,6 +114,7 @@ class PushMessageGenerator(
         dayData: DayData,
         scheduledTime: LocalDateTime,
         actualTime: LocalDateTime,
+        isCatchUp: Boolean,
     ): List<UIMessage> {
         val result = mutableListOf<UIMessage>()
 
@@ -121,7 +124,7 @@ class PushMessageGenerator(
                 appendLine()
             }
             
-            appendLine(buildDayContext(dayData, scheduledTime, actualTime))
+            appendLine(buildDayContext(dayData, scheduledTime, actualTime, isCatchUp))
         }.trim()
 
         result.add(UIMessage.system(systemPrompt))
@@ -151,6 +154,7 @@ class PushMessageGenerator(
         dayData: DayData,
         scheduledTime: LocalDateTime,
         actualTime: LocalDateTime,
+        isCatchUp: Boolean = false,
     ): String = buildString {
         val date = runCatching { dayData.localDate() }.getOrElse { LocalDate.now() }
         val now = LocalDateTime.now()
@@ -164,14 +168,20 @@ class PushMessageGenerator(
             "当前时间：${now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}（$weekday）"
         )
         
-        // 第二阶段：如果有延迟，告知延迟信息
-        // 注意：第一阶段 actualTime 总是等于 now，scheduledTime 是设定的时间
-        // 只有当 actualTime 明显晚于 scheduledTime（超过 1 分钟）时才说明是延迟推送
+        // 延迟说明。原因必须说实话：补做场景她并不在线，是闹钟被系统清掉了。
+        // 给错原因会让模型照着错误前提说话。
         val delayMinutes = java.time.Duration.between(scheduledTime, actualTime).toMinutes()
         if (delayMinutes > 1) {
             val scheduledStr = scheduledTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
             val actualStr = actualTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-            appendLine("这条推送原计划在 $scheduledStr 发送，因检测到用户当时在线活跃，延迟至 $actualStr 发送。")
+            if (isCatchUp) {
+                appendLine(
+                    "这条推送原计划在 $scheduledStr 发送，但当时手机系统把定时任务清掉了，没能发出去，" +
+                        "现在 $actualStr 才补发。她并不知道这件事，也不是她的问题。"
+                )
+            } else {
+                appendLine("这条推送原计划在 $scheduledStr 发送，因检测到用户当时在线活跃，延迟至 $actualStr 发送。")
+            }
         }
         
         if (date != now.toLocalDate()) {

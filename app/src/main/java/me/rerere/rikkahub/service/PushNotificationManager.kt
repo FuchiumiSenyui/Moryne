@@ -4,8 +4,13 @@ import android.app.Application
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.RouteActivity
@@ -17,6 +22,7 @@ import me.rerere.rikkahub.data.calendar.NotificationContentMode
 import me.rerere.rikkahub.data.calendar.PushContentSource
 import me.rerere.rikkahub.data.calendar.PushMessageGenerator
 import me.rerere.rikkahub.data.calendar.PushSettings
+import me.rerere.rikkahub.data.calendar.PushTime
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.utils.NotificationUtil
 import java.time.LocalDate
@@ -46,7 +52,10 @@ class PushNotificationManager(
     
     // 互斥锁：确保 executePush 不会并发执行
     private val executeMutex = Mutex()
-    
+
+    // 补做闸门："yyyy-MM-dd@HH:mm"，每个时刻每天只补一次，防止生成失败后每次开 App 都重试
+    private val catchUpAttempted = mutableSetOf<String>()
+
     // 防止重复启动监听器
     @Volatile
     private var isStarted = false
@@ -57,20 +66,99 @@ class PushNotificationManager(
             return
         }
         isStarted = true
-        Log.i(TAG, "PushNotificationManager started (event bus listener removed, push via foreground service only)")
+        Log.i(TAG, "PushNotificationManager started (push via foreground service only)")
+        observeForegroundForCatchUp()
     }
 
     /**
-     * 执行推送（公开方法，供 PushAlarmReceiver 直接调用）
+     * 进入前台时补做今天错过的推送。
+     *
+     * 为什么挂在前台生命周期上、而不是直接在 Application.onCreate 里补：
+     * Android 12+ 禁止从后台启动前台服务，而 `Application.onCreate` 期间进程仍算后台，
+     * 在那儿调 startForegroundService 会被系统拒掉（抛
+     * ForegroundServiceStartNotAllowedException）。ON_START 时已经确定在前台，可以合法启动。
+     *
+     * 重复保护由 executeMutex 和日历里的 isPushed/scheduledTime 判据兜着。
      */
-    suspend fun executePush(scheduledHour: Int, scheduledMinute: Int) {
+    private fun observeForegroundForCatchUp() {
+        val owner = ProcessLifecycleOwner.get()
+        owner.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(lifecycleOwner: LifecycleOwner) {
+                owner.lifecycleScope.launch {
+                    runCatching {
+                        val missed = findMissedPushToday() ?: return@runCatching
+
+                        // 每个时刻每天只补一次。生成失败时日历里不会留记录，
+                        // 没这道闸的话每开一次 App 就重试一次，白烧 API。
+                        val attemptKey = "${LocalDate.now()}@$missed"
+                        synchronized(catchUpAttempted) {
+                            if (!catchUpAttempted.add(attemptKey)) {
+                                Log.i(TAG, "Catch-up for $attemptKey already attempted, skipping")
+                                return@runCatching
+                            }
+                        }
+
+                        Log.i(TAG, "Foreground: found missed push today at $missed, catching up")
+                        PushGenerationService.start(
+                            context = application,
+                            hour = missed.hour,
+                            minute = missed.minute,
+                            isCatchUp = true,
+                        )
+                    }.onFailure {
+                        Log.e(TAG, "Catch-up on foreground failed", it)
+                    }
+                }
+            }
+        })
+    }
+
+    /**
+     * 找出今天「已经过点但没推成」的推送时刻，用于补做。
+     *
+     * 判据复用防重那一套：日历里有 isPushed && scheduledTime == 该时刻 就算推过了。
+     * 所以不需要额外落盘记录，也不会跟防重打架。
+     *
+     * 只返回**最近错过的那一个**：配了多个推送时间时，一次性全补会让她一开 App
+     * 就收到好几条。
+     *
+     * @return 最近错过的时刻，没有则 null
+     */
+    suspend fun findMissedPushToday(): PushTime? {
+        val pushSettings = calendarStore.getPushSettings()
+        if (!pushSettings.enabled) return null
+
+        val now = LocalDateTime.now()
+        val date = LocalDate.now()
+        val dayData = calendarStore.getCalendarData().getDay(date)
+
+        return pushSettings.pushTimes
+            .distinct()
+            .filter { it.toTodayDateTime().isBefore(now) } // 今天已经过点的
+            .filter { pushTime ->
+                val scheduled = pushTime.toTodayDateTime().toString()
+                dayData.messages.none { it.isPushed && it.scheduledTime == scheduled }
+            }
+            .maxByOrNull { it.toTodayDateTime() } // 最近的那一个
+    }
+
+    /**
+     * 执行推送（公开方法，供 PushGenerationService 调用）
+     *
+     * @param isCatchUp 是否是补做（闹钟丢失后启动时补发），影响告知模型的延迟原因
+     */
+    suspend fun executePush(scheduledHour: Int, scheduledMinute: Int, isCatchUp: Boolean = false) {
         // 互斥锁：同一时间只能有一个 executePush 在运行
         executeMutex.withLock {
-            doExecutePush(scheduledHour, scheduledMinute)
+            doExecutePush(scheduledHour, scheduledMinute, isCatchUp)
         }
     }
-    
-    private suspend fun doExecutePush(scheduledHour: Int, scheduledMinute: Int) {
+
+    private suspend fun doExecutePush(
+        scheduledHour: Int,
+        scheduledMinute: Int,
+        isCatchUp: Boolean = false,
+    ) {
         val pushKey = String.format("%02d:%02d", scheduledHour, scheduledMinute)
         val now = System.currentTimeMillis()
         
@@ -135,6 +223,7 @@ class PushNotificationManager(
                     date = date,
                     scheduledTime = scheduledTime,
                     actualTime = actualTime,
+                    isCatchUp = isCatchUp,
                     fallbackModelId = fallbackModelId,
                 ).catch { e ->
                     Log.e(TAG, "Failed to generate push message", e)

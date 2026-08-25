@@ -30,19 +30,26 @@ class BootReceiver : BroadcastReceiver(), KoinComponent {
             return
         }
 
-        Log.i(TAG, "System boot completed, rescheduling push alarms")
+        Log.i(TAG, "System boot completed, re-arming push alarms")
 
         scope.launch {
             try {
                 val pushSettings = calendarStore.getPushSettings()
-                if (pushSettings.enabled) {
-                    pushScheduler.rescheduleAll(pushSettings.pushTimes)
-                    Log.i(TAG, "Push alarms rescheduled successfully")
-                } else {
+                if (!pushSettings.enabled) {
                     Log.i(TAG, "Push is disabled, no alarms scheduled")
+                    return@launch
                 }
+
+                // 开机后系统已清空所有闹钟，覆盖式排一遍即可，不必取消。
+                // ensureScheduled 内部 allowToday=true：今天还没到的时刻排今天，不顺延。
+                pushScheduler.ensureScheduled(pushSettings.pushTimes)
+                Log.i(TAG, "Push alarms re-armed after boot")
+
+                // 关机期间错过的那次不在这里补：Android 14+ 限制哪些前台服务类型
+                // 可以从 BOOT_COMPLETED 启动，specialUse 不一定被允许。
+                // 交给「App 进入前台时补做」那条路（PushNotificationManager）。
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to reschedule push alarms", e)
+                Log.e(TAG, "Failed to re-arm push alarms after boot", e)
             }
         }
     }

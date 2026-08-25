@@ -63,6 +63,9 @@ class RikkaHubApp : Application() {
         // 兜底补排推送闹钟（一次性闹钟可能已丢失）
         this.rearmPushAlarms()
 
+        // 启动推送管理器：它负责挂上「进前台时补做今天错过的推送」的观察者
+        this.startPushNotificationManager()
+
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
 
@@ -246,23 +249,49 @@ class RikkaHubApp : Application() {
     }
 
     /**
+     * 启动推送管理器。
+     *
+     * 它内部会挂上「App 进入前台时补做今天错过的推送」的观察者，
+     * 所以这个调用不能省 —— 少了它补做逻辑永远不会执行。
+     */
+    private fun startPushNotificationManager() {
+        get<AppScope>().launch {
+            runCatching {
+                get<me.rerere.rikkahub.service.PushNotificationManager>().start()
+                Log.i(TAG, "PushNotificationManager started")
+            }.onFailure {
+                Log.e(TAG, "startPushNotificationManager failed", it)
+            }
+        }
+    }
+
+    /**
      * 兜底补排推送闹钟。
      *
      * setExactAndAllowWhileIdle 是一次性闹钟，可能因强停、ROM 清理、崩溃而丢失。
-     * rescheduleAll 会先取消再重排，已经排好的不会变成两个。
+     *
+     * ⚠️ 只能用 ensureScheduled（覆盖式排，不取消）。
+     * 这里曾经用 rescheduleAll，它会先取消 10 个槽位再重排，其中
+     * pendingIntent.cancel() 会把「正在投递路上」的广播作废 —— 而闹钟响起时
+     * 进程正是被这条广播唤醒的，onCreate 又跑在广播投递之前，
+     * 于是进程一启动就把唤醒自己的闹钟杀了，推送彻底不触发（清后台后必现）。
      */
     private fun rearmPushAlarms() {
         get<AppScope>().launch {
             runCatching {
                 val pushSettings = get<me.rerere.rikkahub.data.calendar.CalendarStore>().getPushSettings()
                 if (pushSettings.enabled) {
-                    get<me.rerere.rikkahub.utils.PushScheduler>().rescheduleAll(pushSettings.pushTimes)
+                    get<me.rerere.rikkahub.utils.PushScheduler>().ensureScheduled(pushSettings.pushTimes)
                     Log.i(TAG, "Push alarms re-armed on app start")
                 }
             }.onFailure {
                 Log.e(TAG, "Failed to re-arm push alarms on app start", it)
             }
         }
+
+        // 补做「今天错过的推送」不在这里做：Android 12+ 不允许从后台启动前台服务，
+        // onCreate 期间进程还算后台，会被系统拒掉。
+        // 改挂在前台生命周期上，见 PushNotificationManager.observeForegroundForCatchUp()。
     }
 
     override fun onTerminate() {

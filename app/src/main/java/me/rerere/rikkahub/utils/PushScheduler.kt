@@ -18,102 +18,151 @@ class PushScheduler(private val context: Context) {
     companion object {
         private const val TAG = "PushScheduler"
         private const val BASE_REQUEST_CODE = 10000 // 推送闹钟的 request code 起始值
+        private const val MAX_SLOTS = 10 // 最多支持 10 个推送时间
     }
 
     /**
-     * 设置每日推送闹钟
-     * 
-     * @param pushTime 推送时间
-     * @param index 时间索引（用于生成唯一的 request code）
+     * 构造闹钟的 PendingIntent。
+     *
+     * @param flags 额外的 flag（FLAG_UPDATE_CURRENT 用于排闹钟，FLAG_NO_CREATE 用于查询/取消）
      */
-    fun scheduleDailyPush(pushTime: PushTime, index: Int) {
-        val requestCode = BASE_REQUEST_CODE + index
+    private fun buildPendingIntent(
+        index: Int,
+        pushTime: PushTime?,
+        flags: Int,
+    ): PendingIntent? {
         val intent = Intent(context, PushAlarmReceiver::class.java).apply {
             action = PushAlarmReceiver.ACTION_PUSH_TRIGGER
-            putExtra(PushAlarmReceiver.EXTRA_PUSH_TIME_HOUR, pushTime.hour)
-            putExtra(PushAlarmReceiver.EXTRA_PUSH_TIME_MINUTE, pushTime.minute)
-        }
-        
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val triggerAtMillis = pushTime.toTodayMillis()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+ 需要检查精确闹钟权限
-            if (alarmManager.canScheduleExactAlarms()) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent
-                )
-                Log.i(TAG, "Scheduled daily push at $pushTime (requestCode=$requestCode, triggerAt=$triggerAtMillis)")
-            } else {
-                Log.w(TAG, "Cannot schedule exact alarm: permission not granted")
+            if (pushTime != null) {
+                putExtra(PushAlarmReceiver.EXTRA_PUSH_TIME_HOUR, pushTime.hour)
+                putExtra(PushAlarmReceiver.EXTRA_PUSH_TIME_MINUTE, pushTime.minute)
             }
-        } else {
-            // Android 12 以下直接设置
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerAtMillis,
-                pendingIntent
-            )
-            Log.i(TAG, "Scheduled daily push at $pushTime (requestCode=$requestCode)")
         }
+        return PendingIntent.getBroadcast(
+            context,
+            BASE_REQUEST_CODE + index,
+            intent,
+            flags or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     /**
-     * 取消推送闹钟
-     * 
-     * @param index 时间索引
+     * 设置每日推送闹钟。
+     *
+     * @param allowToday 是否允许排在今天。
+     *   true（补排/续订）：只要今天这个时刻还没到就排今天，不留安全边距。
+     *   false（用户手动保存设置）：留 2 分钟边距，避免「设置的时间≈当前时间」立即触发。
+     * @return 是否成功排上
+     */
+    fun scheduleDailyPush(pushTime: PushTime, index: Int, allowToday: Boolean = true): Boolean {
+        if (!canScheduleExactAlarms()) {
+            Log.w(TAG, "Cannot schedule exact alarm: permission not granted (pushTime=$pushTime)")
+            return false
+        }
+
+        val pendingIntent = buildPendingIntent(
+            index = index,
+            pushTime = pushTime,
+            flags = PendingIntent.FLAG_UPDATE_CURRENT,
+        ) ?: return false
+
+        val triggerAtMillis = pushTime.nextTriggerMillis(allowToday = allowToday)
+
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            triggerAtMillis,
+            pendingIntent
+        )
+        Log.i(TAG, "Scheduled push at $pushTime (index=$index, triggerAt=$triggerAtMillis)")
+        return true
+    }
+
+    /**
+     * 取消推送闹钟。
+     *
+     * ⚠️ 只调 alarmManager.cancel()，**绝不调 pendingIntent.cancel()**。
+     * 后者会把 PendingIntent 本身作废；如果此刻正有一条广播在投递路上
+     * （闹钟刚响、进程刚被唤醒的那个窗口），会把这条广播直接丢掉，
+     * 表现为「闹钟响了但接收器没被调用」。
      */
     fun cancelPush(index: Int) {
-        val requestCode = BASE_REQUEST_CODE + index
-        val intent = Intent(context, PushAlarmReceiver::class.java).apply {
-            action = PushAlarmReceiver.ACTION_PUSH_TRIGGER
-        }
-        
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        )
+        val pendingIntent = buildPendingIntent(
+            index = index,
+            pushTime = null,
+            flags = PendingIntent.FLAG_NO_CREATE,
+        ) ?: return
 
-        if (pendingIntent != null) {
-            alarmManager.cancel(pendingIntent)
-            pendingIntent.cancel()
-            Log.i(TAG, "Cancelled push alarm (requestCode=$requestCode)")
-        }
+        alarmManager.cancel(pendingIntent)
+        Log.i(TAG, "Cancelled push alarm (index=$index)")
     }
 
     /**
-     * 重新调度所有推送闹钟
-     * 
-     * @param pushTimes 推送时间列表
+     * 重新调度所有推送闹钟 —— 用于「用户在设置里点了保存」。
+     *
+     * 会先取消全部再重排，所以只应该在用户主动改配置时调用。
+     * 进程启动时的兜底补排走 [ensureScheduled]，那条路绝不能取消。
+     *
+     * @param allowToday 见 [scheduleDailyPush]；用户手动保存时传 false
      */
-    fun rescheduleAll(pushTimes: List<PushTime>) {
-        // 取消所有可能存在的旧闹钟（最多支持 10 个推送时间）
-        for (i in 0 until 10) {
-            cancelPush(i)
-        }
-
+    fun rescheduleAll(pushTimes: List<PushTime>, allowToday: Boolean = false) {
         // 去重：同一时刻只设置一个闹钟
         val uniqueTimes = pushTimes.distinct()
         if (uniqueTimes.size < pushTimes.size) {
             Log.w(TAG, "Removed ${pushTimes.size - uniqueTimes.size} duplicate push times")
         }
 
-        // 设置新的闹钟
-        uniqueTimes.forEachIndexed { index, pushTime ->
-            scheduleDailyPush(pushTime, index)
+        // 权限拿不到时不要清空已有闹钟：清了也排不回来，等于把推送彻底弄死。
+        // 关闭推送（传空列表）是明确意图，照常执行。
+        if (uniqueTimes.isNotEmpty() && !canScheduleExactAlarms()) {
+            Log.e(TAG, "Exact alarm permission missing, keeping existing alarms untouched")
+            return
         }
-        
+
+        for (i in 0 until MAX_SLOTS) {
+            cancelPush(i)
+        }
+
+        uniqueTimes.forEachIndexed { index, pushTime ->
+            scheduleDailyPush(pushTime, index, allowToday = allowToday)
+        }
+
         Log.i(TAG, "Rescheduled ${uniqueTimes.size} push alarms")
+    }
+
+    /**
+     * 兜底补排：把所有配置中的槽位「覆盖式」排一遍，**不取消任何东西**。
+     *
+     * 进程启动时和推送响完续订时调用。一次性闹钟可能因强停 / ROM 清理而丢失，需要补。
+     *
+     * 为什么不先查「是否已排」再补缺失的：`FLAG_NO_CREATE` 返回非 null 只能证明
+     * PendingIntent 这个对象还在，不能证明闹钟还挂着（一次性闹钟响过之后对象可能仍存在），
+     * 拿它当「已排」的判据会漏补。
+     *
+     * 为什么覆盖式是安全的：`setExactAndAllowWhileIdle` 对同一个 PendingIntent
+     * 是**替换**语义，不会变成两个；重算出来的时间跟原本排的是同一个时刻，覆盖等于没变。
+     *
+     * 为什么绝不能取消：闹钟响起唤醒进程的那一刻，广播还在投递路上，
+     * `pendingIntent.cancel()` 会把它丢掉 —— 「闹钟把进程唤醒，进程反手杀掉这个闹钟」，
+     * 这正是清后台后推送彻底不触发的原因。
+     *
+     * @return 排上的槽位数
+     */
+    fun ensureScheduled(pushTimes: List<PushTime>): Int {
+        val uniqueTimes = pushTimes.distinct()
+        if (uniqueTimes.isEmpty()) return 0
+
+        if (!canScheduleExactAlarms()) {
+            Log.w(TAG, "ensureScheduled skipped: exact alarm permission not granted")
+            return 0
+        }
+
+        var armed = 0
+        uniqueTimes.forEachIndexed { index, pushTime ->
+            if (scheduleDailyPush(pushTime, index, allowToday = true)) armed++
+        }
+
+        Log.i(TAG, "ensureScheduled: armed $armed of ${uniqueTimes.size} alarm(s)")
+        return armed
     }
 
     /**

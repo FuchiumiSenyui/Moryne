@@ -45,14 +45,18 @@ class PushGenerationService : Service() {
         
         const val EXTRA_PUSH_TIME_HOUR = "push_time_hour"
         const val EXTRA_PUSH_TIME_MINUTE = "push_time_minute"
+        const val EXTRA_IS_CATCH_UP = "is_catch_up"
 
         /**
          * 启动推送生成服务
+         *
+         * @param isCatchUp 是否为补做（闹钟丢失后启动时补发）
          */
-        fun start(context: Context, hour: Int, minute: Int) {
+        fun start(context: Context, hour: Int, minute: Int, isCatchUp: Boolean = false) {
             val intent = Intent(context, PushGenerationService::class.java).apply {
                 putExtra(EXTRA_PUSH_TIME_HOUR, hour)
                 putExtra(EXTRA_PUSH_TIME_MINUTE, minute)
+                putExtra(EXTRA_IS_CATCH_UP, isCatchUp)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -71,6 +75,7 @@ class PushGenerationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val hour = intent?.getIntExtra(EXTRA_PUSH_TIME_HOUR, -1) ?: -1
         val minute = intent?.getIntExtra(EXTRA_PUSH_TIME_MINUTE, -1) ?: -1
+        val isCatchUp = intent?.getBooleanExtra(EXTRA_IS_CATCH_UP, false) ?: false
 
         if (hour == -1 || minute == -1) {
             Log.w(TAG, "Invalid push time, stopping service")
@@ -103,9 +108,13 @@ class PushGenerationService : Service() {
                 // 先续订下一次闹钟，再生成。
                 // setExactAndAllowWhileIdle 是一次性闹钟，不续订的话响过这一次就永远不再响。
                 // 放在生成之前，保证即使生成失败/进程被杀，明天的闹钟也已经排好。
+                //
+                // ⚠️ 必须用 ensureScheduled（覆盖式排，不取消），不能用 rescheduleAll（先取消再排）。
+                // 本服务是被闹钟广播唤起的，此刻可能还有别的槽位的广播在投递路上，
+                // 取消会把它们丢掉。
                 if (pushSettings.enabled) {
-                    runCatching { pushScheduler.rescheduleAll(pushSettings.pushTimes) }
-                        .onFailure { Log.e(TAG, "Failed to reschedule next push alarm", it) }
+                    runCatching { pushScheduler.ensureScheduled(pushSettings.pushTimes) }
+                        .onFailure { Log.e(TAG, "Failed to re-arm next push alarm", it) }
                 }
 
                 // 固定文案模式几乎瞬间完成，显示"正在生成"会误导
@@ -115,8 +124,8 @@ class PushGenerationService : Service() {
                     notificationManager.notify(NOTIFICATION_ID, updatedNotification)
                 }
 
-                Log.i(TAG, "Executing push...")
-                pushNotificationManager.executePush(hour, minute)
+                Log.i(TAG, "Executing push... (isCatchUp=$isCatchUp)")
+                pushNotificationManager.executePush(hour, minute, isCatchUp)
                 Log.i(TAG, "Push executed successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to generate push message", e)

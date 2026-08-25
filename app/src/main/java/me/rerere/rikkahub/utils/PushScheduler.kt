@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.calendar.PushTime
 import me.rerere.rikkahub.receiver.PushAlarmReceiver
 
@@ -19,6 +20,9 @@ class PushScheduler(private val context: Context) {
         private const val TAG = "PushScheduler"
         private const val BASE_REQUEST_CODE = 10000 // 推送闹钟的 request code 起始值
         private const val MAX_SLOTS = 10 // 最多支持 10 个推送时间
+
+        // setAlarmClock 的 showIntent 用的 request code，跟闹钟本身的错开避免互相覆盖
+        private const val SHOW_INTENT_REQUEST_CODE = 10100
     }
 
     /**
@@ -68,9 +72,26 @@ class PushScheduler(private val context: Context) {
 
         val triggerAtMillis = pushTime.nextTriggerMillis(allowToday = allowToday)
 
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            triggerAtMillis,
+        // 用 setAlarmClock 而不是 setExactAndAllowWhileIdle。
+        //
+        // setExactAndAllowWhileIdle 名字里有 AllowWhileIdle，但它在 Doze 下仍会被限流
+        // （官方限制大约每 9 分钟一次），而且国产 ROM 深度休眠时经常直接不理它 ——
+        // 「锁屏放着不动、到点什么都没有」就是这么来的。
+        //
+        // setAlarmClock 被系统当成「用户设的闹钟」，是优先级最高的一档：Doze 下照样准时响，
+        // ROM 也不敢拦，因为拦了用户的起床闹钟就要出事。代价是状态栏会出现一个闹钟图标、
+        // 系统「下一个闹钟」里能看到时间。对一个用户自己设定的定时推送来说这个代价可以接受，
+        // 某种意义上还是个「推送已排好」的正向指示。
+        //
+        // showIntent 是点状态栏闹钟图标时打开的界面，指向应用本身。
+        val showIntent = PendingIntent.getActivity(
+            context,
+            SHOW_INTENT_REQUEST_CODE + index,
+            Intent(context, RouteActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent),
             pendingIntent
         )
         Log.i(TAG, "Scheduled push at $pushTime (index=$index, triggerAt=$triggerAtMillis)")
@@ -138,8 +159,9 @@ class PushScheduler(private val context: Context) {
      * PendingIntent 这个对象还在，不能证明闹钟还挂着（一次性闹钟响过之后对象可能仍存在），
      * 拿它当「已排」的判据会漏补。
      *
-     * 为什么覆盖式是安全的：`setExactAndAllowWhileIdle` 对同一个 PendingIntent
-     * 是**替换**语义，不会变成两个；重算出来的时间跟原本排的是同一个时刻，覆盖等于没变。
+     * 为什么覆盖式是安全的：AlarmManager 的 set 系列（含 `setAlarmClock`）对同一个
+     * PendingIntent 是**替换**语义，不会变成两个；重算出来的时间跟原本排的是同一个时刻，
+     * 覆盖等于没变。
      *
      * 为什么绝不能取消：闹钟响起唤醒进程的那一刻，广播还在投递路上，
      * `pendingIntent.cancel()` 会把它丢掉 —— 「闹钟把进程唤醒，进程反手杀掉这个闹钟」，

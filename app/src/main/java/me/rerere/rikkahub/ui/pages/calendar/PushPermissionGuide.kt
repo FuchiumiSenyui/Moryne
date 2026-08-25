@@ -41,7 +41,12 @@ fun PushPermissionGuide(
         true // Android 12 以下不需要
     }
 
-    // 如果所有必需权限都已授予，自动关闭
+    // 电池优化豁免状态。系统层面算「可选」，但国产 ROM 上它比精确闹钟权限
+    // 更能决定推送活不活：没豁免进程会被冻结，闹钟到点也叫不醒。
+    val isBatteryExempt = pushScheduler.isIgnoringBatteryOptimizations()
+
+    // 只有必需权限决定是否自动关闭。电池优化不列入条件 —— 它无法用一次点击
+    // 保证拿到（部分 ROM 的开关藏在自家电池管理里），拿它当门槛会让弹窗关不掉。
     LaunchedEffect(hasNotificationPermission, canScheduleExactAlarms) {
         if (hasNotificationPermission && canScheduleExactAlarms) {
             onAllGranted()
@@ -92,10 +97,29 @@ fun PushPermissionGuide(
                     )
                 }
 
-                // 电池优化提示（可选）
+                // 省电限制。放在这里跟前两项同级，因为国产 ROM 上它才是
+                // 推送不来的头号原因，而它以前只是一句灰色小字。
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PermissionItem(
+                        title = "关闭省电限制",
+                        description = "不关的话系统会冻结应用，定时任务到点也叫不醒它",
+                        isGranted = isBatteryExempt,
+                        onGrant = {
+                            // 先试直接申请豁免的弹窗，被 ROM 屏蔽时退回电池优化列表页
+                            val direct = Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:${context.packageName}")
+                            )
+                            val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            runCatching { context.startActivity(direct) }
+                                .recoverCatching { context.startActivity(fallback) }
+                        },
+                    )
+
                     Text(
-                        text = "提示：如果推送不准时，可能需要在系统设置中关闭电池优化（可选）。",
+                        text = "小米 / 华为 / OPPO / vivo 还需要在系统设置里单独开「自启动」" +
+                            "（有的叫「后台运行」），并在最近任务里给应用加锁，" +
+                            "否则清理后台会把定时任务一起清掉。这一步没法由应用代劳。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

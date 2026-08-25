@@ -175,4 +175,39 @@ class PushScheduler(private val context: Context) {
             true // Android 12 以下不需要权限
         }
     }
+
+    /**
+     * 数一下有几个槽位「看起来」还挂着闹钟。
+     *
+     * ⚠️ 这只是个粗略指示，不是可靠判据：`FLAG_NO_CREATE` 返回非 null 只证明
+     * PendingIntent 对象还在，不证明 AlarmManager 里那条闹钟还在
+     * （一次性闹钟响过之后对象通常仍存在）。所以它只用来给使用者看个大概，
+     * 排闹钟的逻辑绝不能拿它当判断依据 —— 见 [ensureScheduled] 的注释。
+     *
+     * 反过来说，返回 0 是**可靠**的坏消息：连对象都没了，闹钟肯定不在。
+     * 强停 / ROM 清理正是这种情况。
+     */
+    fun countLiveSlots(): Int {
+        var count = 0
+        for (i in 0 until MAX_SLOTS) {
+            val pi = buildPendingIntent(
+                index = i,
+                pushTime = null,
+                flags = PendingIntent.FLAG_NO_CREATE,
+            )
+            if (pi != null) count++
+        }
+        return count
+    }
+
+    /**
+     * 应用是否已被豁免电池优化。
+     *
+     * 国产 ROM 上这一条比精确闹钟权限更能决定推送活不活：没豁免的话
+     * 进程被冻结，闹钟即便排上了也可能延迟很久甚至不触发。
+     */
+    fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        return pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
 }

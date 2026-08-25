@@ -56,6 +56,13 @@ fun PushSettingsDialog(
     val hasAlarm = pushScheduler.canScheduleExactAlarms()
     val hasAllPermissions = hasNotification && hasAlarm
 
+    // 推送实际状态。每次打开对话框重新查，不做缓存 —— 用户很可能是刚去系统设置
+    // 改完权限回来的，缓存会显示过期状态。
+    val liveSlots = remember { pushScheduler.countLiveSlots() }
+    val batteryExempt = remember { pushScheduler.isIgnoringBatteryOptimizations() }
+    // 配置说该有闹钟，但一个都查不到 —— 强停 / ROM 清理干的，推送已经死了
+    val alarmsLost = settings.enabled && settings.pushTimes.isNotEmpty() && liveSlots == 0
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("推送配置") },
@@ -94,6 +101,40 @@ fun PushSettingsDialog(
                     )
                     TextButton(onClick = { showPermissionGuide = true }) {
                         Text("查看权限设置")
+                    }
+                }
+
+                // 推送状态。目的是让「推送为什么没来」这件事在应用里能看见，
+                // 而不是只能靠猜或者连电脑看日志。
+                if (settings.enabled) {
+                    Divider()
+                    Text("推送状态", style = MaterialTheme.typography.titleSmall)
+
+                    if (alarmsLost) {
+                        Text(
+                            text = "定时任务已失效。手机清理后台或强制停止应用会把它清掉，" +
+                                "系统不会自动恢复。点下面的保存按钮即可重新排上。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        Text(
+                            text = "定时任务正常（$liveSlots 个时刻已排上）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    if (!batteryExempt) {
+                        Text(
+                            text = "省电限制未关闭。这是推送不来最常见的原因 —— 系统会冻结应用，" +
+                                "定时任务到点也叫不醒它。国产系统还需要另外开「自启动」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = { showPermissionGuide = true }) {
+                            Text("去关掉省电限制")
+                        }
                     }
                 }
 

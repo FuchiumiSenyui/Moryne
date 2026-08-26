@@ -11,7 +11,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.PUSH_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.data.calendar.CalendarStore
-import me.rerere.rikkahub.data.calendar.PushContentSource
 import me.rerere.rikkahub.service.PushGenerationService
 import me.rerere.rikkahub.service.PushNotificationManager
 import me.rerere.rikkahub.utils.NotificationUtil
@@ -74,46 +73,35 @@ class PushAlarmReceiver : BroadcastReceiver(), KoinComponent {
 
         Log.i(TAG, "Push alarm triggered at $hour:$minute")
 
-        // 固定文案模式在广播里直接做完，不启前台服务。
+        // 两条路径统一走前台服务：它是唯一能在冷启动时保护进程不被杀的机制。
         //
-        // 它不联网、不长跑：读一次 DataStore、挑一条字符串、写日历、发通知，
-        // 通常几十毫秒。而「从后台启前台服务」是 Android 12+ 限制最严、
-        // 国产 ROM 拦得最多的一道关卡 —— 让一个根本不需要它的路径去闯这道关，
-        // 等于白背一整类失败风险（启动被拒、5 秒内没调 startForeground 崩溃）。
+        // 之前固定文案模式为了规避「从后台启前台服务」的限制改成了 goAsync() 内联，
+        // 但实测在国产 ROM 上进程保护不足，冷启动时进程被系统杀掉导致推送丢失。
+        // 渊海同样的逻辑走前台服务完全没问题，说明前台服务启动在 setAlarmClock
+        // 的豁免窗口内是可靠的。
         //
-        // goAsync() 把广播的存活期从 onReceive 返回延长到 finish()，
-        // 系统给约 10 秒，对这条路径绰绰有余。仍设 8 秒超时兜底，
-        // 避免 DataStore 异常卡住导致 ANR。
+        // 仍然保留 goAsync fallback：万一 ROM 拒绝前台服务启动，退化到内联执行，
+        // 至少不比完全不做强。
         val pendingResult = goAsync()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         scope.launch {
             try {
                 val pushSettings = calendarStore.getPushSettings()
 
-                // 先续订下一次闹钟，跟前台服务那条路保持一致：
-                // 一次性闹钟不续订就只响这一次。放在最前面，保证后面失败也不影响明天。
                 if (pushSettings.enabled) {
                     runCatching { pushScheduler.ensureScheduled(pushSettings.pushTimes) }
                         .onFailure { Log.e(TAG, "Failed to re-arm next push alarm", it) }
                 }
 
-                if (pushSettings.contentSource == PushContentSource.FIXED_TEXT) {
-                    Log.i(TAG, "Fixed-text mode: executing inline, no foreground service")
+                // 优先走前台服务（有进程保护），被拒时 fallback 到内联
+                val serviceStarted = runCatching {
+                    PushGenerationService.start(context, hour, minute)
+                }.isSuccess
+
+                if (!serviceStarted) {
+                    Log.w(TAG, "Foreground service rejected, falling back to inline execution")
                     withTimeout(8_000) {
                         pushNotificationManager.executePush(hour, minute)
-                    }
-                    Log.i(TAG, "Fixed-text push done inline")
-                } else {
-                    // AI 模式要联网、要跑几十秒，必须有前台服务保命。
-                    //
-                    // 必须兜住异常：部分 ROM 不认精确闹钟的后台启动豁免，
-                    // 会抛 ForegroundServiceStartNotAllowedException。不兜的话
-                    // 接收器直接崩，用户侧表现为「到点什么都没有」，无从排查。
-                    runCatching {
-                        PushGenerationService.start(context, hour, minute)
-                    }.onFailure { e ->
-                        Log.e(TAG, "Failed to start PushGenerationService for $hour:$minute", e)
-                        notifyDeliveryFailed(context, hour, minute, e)
                     }
                 }
             } catch (e: Exception) {

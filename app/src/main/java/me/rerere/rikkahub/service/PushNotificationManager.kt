@@ -386,6 +386,11 @@ class PushNotificationManager(
             contentIntent = pendingIntent
             // 部分 ROM 拿 category 判断要不要给横幅和铃声，REMINDER 是这条通知的实际语义
             category = android.app.Notification.CATEGORY_REMINDER
+            // 国产 ROM（特别是 MIUI）除了看 channel 还会看 Builder 的 priority，
+            // 不设的话即使 channel 是 IMPORTANCE_HIGH 也可能被降为静默。
+            // DEFAULT_ALL 让 pre-O 设备和部分二次判断的 ROM 都能出声+振动。
+            useDefaults = true
+            highPriority = true
         }
 
         if (success) {

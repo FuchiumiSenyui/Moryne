@@ -34,6 +34,9 @@ class NotificationConfig {
 
     // 默认通知效果
     var useDefaults: Boolean = false
+
+    // 高优先级标记（配合 IMPORTANCE_HIGH channel 让部分 ROM 出横幅）
+    var highPriority: Boolean = false
 }
 
 object NotificationUtil {
@@ -102,6 +105,10 @@ object NotificationUtil {
 
             if (config.useDefaults) {
                 setDefaults(NotificationCompat.DEFAULT_ALL)
+            }
+
+            if (config.highPriority) {
+                setPriority(NotificationCompat.PRIORITY_HIGH)
             }
 
             // Android 15+ Live Update 支持

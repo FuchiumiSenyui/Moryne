@@ -32,6 +32,7 @@ class BootReceiver : BroadcastReceiver(), KoinComponent {
 
         Log.i(TAG, "System boot completed, re-arming push alarms")
 
+        val pendingResult = goAsync()
         scope.launch {
             try {
                 val pushSettings = calendarStore.getPushSettings()
@@ -50,6 +51,8 @@ class BootReceiver : BroadcastReceiver(), KoinComponent {
                 // 交给「App 进入前台时补做」那条路（PushNotificationManager）。
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to re-arm push alarms after boot", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }

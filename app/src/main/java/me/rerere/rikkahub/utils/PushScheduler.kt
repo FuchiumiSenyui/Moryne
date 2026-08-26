@@ -232,4 +232,43 @@ class PushScheduler(private val context: Context) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         return pm.isIgnoringBatteryOptimizations(context.packageName)
     }
+
+    /**
+     * 系统「下一个闹钟」里登记的是谁、什么时候。
+     *
+     * setAlarmClock 排的闹钟会登记在这里，状态栏图标也由它驱动。
+     * 用来回答一个之前只能靠肉眼看状态栏、而且看不准的问题：闹钟到底排上了没有。
+     *
+     * 注意全系统只有**一个**「下一个闹钟」槽位：如果用户自己的时钟应用设了更早的闹钟，
+     * 这里返回的就是那一个，包名不是本应用。所以包名不匹配**不等于**我们的闹钟没排上，
+     * 只能说明它不是最近的那一个 —— 判断时必须结合 [describeNextAlarm] 的文案，
+     * 不能直接当成失败。
+     */
+    fun nextSystemAlarm(): AlarmManager.AlarmClockInfo? =
+        runCatching { alarmManager.nextAlarmClock }.getOrNull()
+
+    /**
+     * 把闹钟状态说成人话，直接显示给使用者。
+     *
+     * 这里刻意区分「我们的闹钟是最近的一个」「有别的应用闹钟更近」「一个都没有」，
+     * 因为第二种情况完全正常，却最容易被误读成推送坏了。
+     */
+    fun describeNextAlarm(): String {
+        val info = nextSystemAlarm()
+            ?: return "系统里没有任何已登记的闹钟"
+
+        val whenText = runCatching {
+            java.time.Instant.ofEpochMilli(info.triggerTime)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+        }.getOrElse { "时间未知" }
+
+        val ownerPackage = runCatching { info.showIntent?.creatorPackage }.getOrNull()
+        return if (ownerPackage == context.packageName) {
+            "下一次推送：$whenText"
+        } else {
+            // 系统只保留最近的那一个，别的应用闹钟更近时会占据这个位置
+            "系统最近的闹钟是其他应用的（$whenText），本应用的推送闹钟排在它之后"
+        }
+    }
 }

@@ -60,6 +60,8 @@ fun PushSettingsDialog(
     // 改完权限回来的，缓存会显示过期状态。
     val liveSlots = remember { pushScheduler.countLiveSlots() }
     val batteryExempt = remember { pushScheduler.isIgnoringBatteryOptimizations() }
+    // 系统「下一个闹钟」的真实登记情况，比 countLiveSlots 可信
+    val nextAlarmText = remember { pushScheduler.describeNextAlarm() }
     // 配置说该有闹钟，但一个都查不到 —— 强停 / ROM 清理干的，推送已经死了
     val alarmsLost = settings.enabled && settings.pushTimes.isNotEmpty() && liveSlots == 0
 
@@ -124,6 +126,14 @@ fun PushSettingsDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+
+                    // 系统侧的登记情况。上面那行只能证明「对象还在」，
+                    // 这行才是系统真的认下了这个闹钟。
+                    Text(
+                        text = nextAlarmText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
 
                     if (!batteryExempt) {
                         Text(
@@ -426,13 +436,22 @@ fun PushSettingsDialog(
                     )
                     onSave(newSettings)
 
-                    // 更新推送调度。
-                    // 这是「用户主动保存」这一条路，允许先取消再重排；
+                    // 更新推送调度。这是「用户主动保存」这一条路，允许先取消再重排；
                     // allowToday=false 保留 2 分钟安全边距，避免设的时间≈当前时间导致立即触发。
-                    if (enabled && hasAllPermissions) {
+                    //
+                    // 只看 enabled，不看权限。这里原来的条件是 enabled && hasAllPermissions，
+                    // 把两件毫不相干的事混成了一个：
+                    //
+                    //   「用户关掉了推送」 —— 明确意图，该取消闹钟；
+                    //   「权限没查齐」     —— 临时状态，取消闹钟等于把推送弄死，
+                    //                        而且之后没有任何东西会把它排回来。
+                    //
+                    // 通知权限尤其不该参与：它只决定通知能不能显示，跟闹钟能不能排毫无关系。
+                    // 少了它顶多是闹钟响了但通知不弹，而不该是闹钟压根不排。
+                    // 精确闹钟权限的守卫在 rescheduleAll 内部（拿不到权限时拒绝清空已有闹钟）。
+                    if (enabled) {
                         pushScheduler.rescheduleAll(pushTimes, allowToday = false)
                     } else {
-                        // 关闭推送，取消所有闹钟
                         pushScheduler.rescheduleAll(emptyList())
                     }
                     

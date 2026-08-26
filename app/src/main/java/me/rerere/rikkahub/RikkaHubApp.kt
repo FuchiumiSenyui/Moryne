@@ -46,7 +46,22 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
-const val PUSH_NOTIFICATION_CHANNEL_ID = "calendar_push"
+/**
+ * 日历推送渠道。
+ *
+ * ⚠️ 带 _v2 后缀是因为渠道属性创建后不可再改：`createNotificationChannel`
+ * 对已存在的 ID 是空操作，importance / 声音 / 震动永久锁定在第一次创建时的状态，
+ * 代码里怎么改都不生效，用户只能自己去系统设置里改。
+ *
+ * 老渠道 "calendar_push" 在部分设备上被锁成了静默（早期版本创建时的状态），
+ * 表现为推送只有静默通知、没有铃声和横幅。换 ID 是唯一能在代码侧修正的办法。
+ *
+ * 以后要改这个渠道的声音或重要性，同样必须再升一版后缀。
+ */
+const val PUSH_NOTIFICATION_CHANNEL_ID = "calendar_push_v2"
+
+/** 被 _v2 取代的老渠道，仅用于启动时删掉，避免设置里留一个不再使用的条目 */
+private const val LEGACY_PUSH_NOTIFICATION_CHANNEL_ID = "calendar_push"
 const val PUSH_GENERATION_NOTIFICATION_CHANNEL_ID = "push_generation"
 
 class RikkaHubApp : Application() {
@@ -230,11 +245,25 @@ class RikkaHubApp : Application() {
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
 
+        // 老渠道已被 _v2 取代，删掉避免系统设置里留一个不再使用的条目。
+        // 放在创建新渠道之前，顺序无关，但集中在一处更清楚。
+        runCatching {
+            notificationManager.deleteNotificationChannel(LEGACY_PUSH_NOTIFICATION_CHANNEL_ID)
+        }.onFailure { Log.w(TAG, "Failed to delete legacy push channel", it) }
+
+        // 声音和震动显式写出来，不靠 Builder 的默认值：
+        // 这个渠道就是为了「有铃声有横幅」而重建的，依赖隐式默认值会让意图不可见，
+        // 以后别人改动时容易误删。
         val pushChannel = NotificationChannelCompat
             .Builder(PUSH_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
             .setName("日历推送")
             .setDescription("定时推送消息")
             .setVibrationEnabled(true)
+            .setLightsEnabled(true)
+            .setSound(
+                android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
+                android.app.Notification.AUDIO_ATTRIBUTES_DEFAULT
+            )
             .build()
         notificationManager.createNotificationChannel(pushChannel)
 

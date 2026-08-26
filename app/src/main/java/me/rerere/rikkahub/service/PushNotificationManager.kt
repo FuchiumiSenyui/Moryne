@@ -381,6 +381,8 @@ class PushNotificationManager(
             this.content = notificationContent
             autoCancel = true
             contentIntent = pendingIntent
+            // 部分 ROM 拿 category 判断要不要给横幅和铃声，REMINDER 是这条通知的实际语义
+            category = android.app.Notification.CATEGORY_REMINDER
         }
 
         if (success) {

@@ -20,6 +20,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Message02
 
 import me.rerere.ai.provider.ModelType
+import me.rerere.rikkahub.data.calendar.DiarySettings
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -172,6 +173,8 @@ fun CalendarPage(vm: CalendarVM = koinViewModel()) {
                     streamingReply = streamingReply,
                     replyError = replyError,
                     diaryEnabled = diarySettings.enabled,
+                    aiName = diarySettings.displayAiName(),
+                    userName = diarySettings.displayUserName(),
                     onSend = { vm.sendDiaryMessage(it) },
                     onRetry = { vm.requestDiaryReply() },
                     onDelete = { vm.deleteMessage(it) },
@@ -262,6 +265,8 @@ private fun DiarySettingsDialog(
     var enabled by remember { mutableStateOf(settings.enabled) }
     var prompt by remember { mutableStateOf(settings.systemPrompt) }
     var modelId by remember { mutableStateOf(settings.resolvedModelId()) }
+    var aiName by remember { mutableStateOf(settings.aiName) }
+    var userName by remember { mutableStateOf(settings.userName) }
 
 
     AlertDialog(
@@ -302,6 +307,34 @@ private fun DiarySettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // 对话气泡上显示的名字。留空各自回落到「AI」「我」，
+                // 所以这里不做非空校验。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = aiName,
+                        onValueChange = { aiName = it },
+                        label = { Text("AI 的名字") },
+                        placeholder = { Text(DiarySettings.DEFAULT_AI_NAME) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = userName,
+                        onValueChange = { userName = it },
+                        label = { Text("我的名字") },
+                        placeholder = { Text(DiarySettings.DEFAULT_USER_NAME) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    text = "留空则显示「${DiarySettings.DEFAULT_AI_NAME}」「${DiarySettings.DEFAULT_USER_NAME}」",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
 
                     value = prompt,
@@ -321,6 +354,8 @@ private fun DiarySettingsDialog(
                         enabled = enabled,
                         systemPrompt = prompt,
                         modelId = modelId?.toString(),
+                        aiName = aiName,
+                        userName = userName,
                     )
                 )
 

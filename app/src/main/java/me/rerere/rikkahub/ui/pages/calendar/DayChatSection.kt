@@ -36,6 +36,8 @@ fun DayChatSection(
     streamingReply: String,
     replyError: String?,
     diaryEnabled: Boolean,
+    aiName: String,
+    userName: String,
     onSend: (String) -> Unit,
     onRetry: () -> Unit,
     onDelete: (Message) -> Unit,
@@ -110,6 +112,8 @@ fun DayChatSection(
 
                 ChatBubble(
                     message = message,
+                    aiName = aiName,
+                    userName = userName,
                     actionsEnabled = isToday,
                     onDelete = { deleting = message },
                     onEdit = { editing = message },
@@ -131,6 +135,8 @@ fun DayChatSection(
                         role = MessageRole.ASSISTANT,
                         content = streamingReply.ifBlank { "…" },
                     ),
+                    aiName = aiName,
+                    userName = userName,
                     actionsEnabled = false,
                     onDelete = {},
                     onEdit = {},
@@ -308,6 +314,8 @@ private fun TopicDivider() {
 @Composable
 private fun ChatBubble(
     message: Message,
+    aiName: String,
+    userName: String,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
     onRegenerate: () -> Unit,
@@ -357,7 +365,7 @@ private fun ChatBubble(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (isUser) "我" else "AI",
+                            text = if (isUser) userName else aiName,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isUser) {
                                 MaterialTheme.colorScheme.primary

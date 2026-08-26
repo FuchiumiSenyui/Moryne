@@ -113,6 +113,9 @@ class PushNotificationManager(
         })
     }
 
+    /** 供 worker 等外部入口读一次推送配置，避免它们各自持有 CalendarStore */
+    suspend fun currentPushSettings(): PushSettings = calendarStore.getPushSettings()
+
     /**
      * 找出今天「已经过点但没推成」的推送时刻，用于补做。
      *

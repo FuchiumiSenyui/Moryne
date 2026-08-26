@@ -81,6 +81,9 @@ class RikkaHubApp : Application() {
         // 启动推送管理器：它负责挂上「进前台时补做今天错过的推送」的观察者
         this.startPushNotificationManager()
 
+        // 周期性兜底：闹钟被系统抹掉时，不必等使用者主动开应用也能补上
+        this.schedulePushCatchUpWorker()
+
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
 
@@ -291,6 +294,30 @@ class RikkaHubApp : Application() {
             }.onFailure {
                 Log.e(TAG, "startPushNotificationManager failed", it)
             }
+        }
+    }
+
+    /**
+     * 挂上推送兜底 worker。
+     *
+     * 15 分钟是 WorkManager 允许的最小周期，再小系统也会拉长到 15 分钟。
+     * 用 KEEP：已经排过就不动它，避免每次启动都重置周期导致永远排不到执行。
+     */
+    private fun schedulePushCatchUpWorker() {
+        runCatching {
+            val request = androidx.work.PeriodicWorkRequestBuilder<
+                me.rerere.rikkahub.worker.PushCatchUpWorker>(
+                15, java.util.concurrent.TimeUnit.MINUTES
+            ).build()
+
+            androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                me.rerere.rikkahub.worker.PushCatchUpWorker.UNIQUE_NAME,
+                androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+            Log.i(TAG, "Push catch-up worker scheduled")
+        }.onFailure {
+            Log.e(TAG, "Failed to schedule push catch-up worker", it)
         }
     }
 

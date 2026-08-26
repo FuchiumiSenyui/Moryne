@@ -1,0 +1,41 @@
+<!--
+  状态栏通知图标。
+
+  约束：状态栏图标只有 alpha 通道有意义，系统会整体重新着色，所以必须是
+  纯白 + 透明背景，不能带颜色和渐变。24dp 画布，图形收在中间约 20dp 内留出边距。
+
+  形状是日历轮廓 + 一个实心点（「这一天有东西」），跟抽屉里的日历入口
+  和这个应用的功能对得上。不用启动图标那张脸：照片派生的剪影在 24dp 下
+  只是一团糊斑，比原来的图标更差。
+
+  边框用 evenOdd 挖空实现而不是 strokeWidth：部分 ROM 的状态栏渲染
+  对 stroke 支持不一致，实心路径最稳。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="24dp"
+  android:height="24dp"
+  android:viewportWidth="24"
+  android:viewportHeight="24">
+
+  <!-- 顶部两个挂钩 -->
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:pathData="M7.25,2.5 h1.5 v3 h-1.5z" />
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:pathData="M15.25,2.5 h1.5 v3 h-1.5z" />
+
+  <!-- 外框 + 内挖，得到 1.6dp 粗的边框和一条表头分隔线 -->
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:fillType="evenOdd"
+    android:pathData="M3.5,6 a1.6,1.6 0 0,1 1.6,-1.6 h13.8 a1.6,1.6 0 0,1 1.6,1.6 v13.9 a1.6,1.6 0 0,1 -1.6,1.6 h-13.8 a1.6,1.6 0 0,1 -1.6,-1.6 z M5.1,9.4 v10.5 h13.8 v-10.5 z" />
+
+  <!--
+    实心点。用两段半圆弧画整圆，不用「单条弧回到起点」那种写法 ——
+    后者在部分渲染器上会退化成一条线。
+  -->
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:pathData="M9.6,14.65 a2.4,2.4 0 0,1 4.8,0 a2.4,2.4 0 0,1 -4.8,0 z" />
+</vector>

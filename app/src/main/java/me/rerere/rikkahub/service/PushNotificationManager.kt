@@ -184,7 +184,6 @@ class PushNotificationManager(
                 return
             }
 
-            val settings = settingsStore.settingsFlowRaw.first()
             val date = LocalDate.now()
             val scheduledTime = LocalDateTime.of(date, LocalTime.of(scheduledHour, scheduledMinute))
             val actualTime = LocalDateTime.now()
@@ -212,6 +211,12 @@ class PushNotificationManager(
                 generatedContent = picked
                 Log.i(TAG, "Using fixed text push (no API call)")
             } else {
+                // 只有 AI 模式才需要全局设置。这行原来在分支之前无条件执行，
+                // 但 settingsFlowRaw 读的是整份应用配置（含所有供应商），是个很大的 JSON；
+                // 闹钟冷启动时它慢一点或抛一次异常，就会把根本不需要它的
+                // 固定文案推送一起弄死。
+                val settings = settingsStore.settingsFlowRaw.first()
+
                 // 获取当前使用的模型（作为 fallback）
                 val fallbackModelId = settings.chatModelId
 

@@ -40,6 +40,7 @@ class DiaryChatGenerator(
         diarySettings: DiarySettings,
         dayData: DayData,
         fallbackModelId: kotlin.uuid.Uuid?,
+        checkInSettings: CheckInSettings = CheckInSettings.DEFAULT,
     ): Flow<String> = flow {
         val modelId = diarySettings.resolvedModelId() ?: fallbackModelId
         ?: error("未选择模型")
@@ -50,7 +51,7 @@ class DiaryChatGenerator(
 
         val providerHandler = providerManager.getProviderByType(provider)
 
-        var messages = buildMessages(diarySettings, dayData)
+        var messages = buildMessages(diarySettings, dayData, checkInSettings)
         var reply = ""
 
         val tools = buildCalendarTools(json, calendarStore)
@@ -97,6 +98,7 @@ class DiaryChatGenerator(
     private fun buildMessages(
         diarySettings: DiarySettings,
         dayData: DayData,
+        checkInSettings: CheckInSettings,
     ): List<UIMessage> {
         val result = mutableListOf<UIMessage>()
 
@@ -105,7 +107,7 @@ class DiaryChatGenerator(
                 appendLine(diarySettings.systemPrompt)
                 appendLine()
             }
-            appendLine(buildDayContext(dayData))
+            appendLine(buildDayContext(dayData, checkInSettings))
         }.trim()
 
         result.add(UIMessage.system(systemPrompt))
@@ -133,7 +135,7 @@ class DiaryChatGenerator(
     }
 
     /** 当天的客观状态，作为上下文交给模型 */
-    private fun buildDayContext(dayData: DayData): String = buildString {
+    private fun buildDayContext(dayData: DayData, checkInSettings: CheckInSettings): String = buildString {
         val date = runCatching { dayData.localDate() }.getOrElse { LocalDate.now() }
         val now = java.time.LocalDateTime.now()
         val weekday = now.dayOfWeek.getDisplayName(
@@ -153,6 +155,19 @@ class DiaryChatGenerator(
                 appendLine("今日标注：${annotation.title}${
                     if (annotation.note.isNotBlank()) "（${annotation.note}）" else ""
                 }")
+            }
+        }
+
+        // 打卡状态
+        if (checkInSettings.items.isNotEmpty()) {
+            appendLine()
+            appendLine("## 每日项目")
+            checkInSettings.items.forEach { item ->
+                val record = dayData.checkIns.find { it.itemId == item.id }
+                val status = if (record?.completed == true) "已完成" else "未完成"
+                val note = record?.note?.takeIf { it.isNotBlank() }
+                val noteText = if (note != null) "（备注：$note）" else ""
+                appendLine("- ${item.name}：$status$noteText")
             }
         }
     }

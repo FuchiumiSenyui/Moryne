@@ -48,8 +48,8 @@ data class DiarySettings(
     }
 
     companion object {
-        const val DEFAULT_AI_NAME = "AI"
-        const val DEFAULT_USER_NAME = "我"
+        const val DEFAULT_AI_NAME = "Moryne"
+        const val DEFAULT_USER_NAME = "Rover"
 
         /** 默认提示词只是个能用的起点，建议在设置页整段换成自己想要的角色和语气。 */
         const val DEFAULT_PROMPT = """你是这本日历里的对话对象，陪使用者记录每一天。

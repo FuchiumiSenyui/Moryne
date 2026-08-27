@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.calendar
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 
 
@@ -17,7 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Message02
+import me.rerere.hugeicons.stroke.PencilEdit01
 
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.calendar.DiarySettings
@@ -40,12 +43,14 @@ fun CalendarPage(vm: CalendarVM = koinViewModel()) {
     val streamingReply by vm.streamingReply.collectAsStateWithLifecycle()
     val replyError by vm.replyError.collectAsStateWithLifecycle()
     val diarySettings by vm.diarySettings.collectAsStateWithLifecycle()
+    val checkInSettings by vm.checkInSettings.collectAsStateWithLifecycle()
 
     var currentMonth by remember { mutableStateOf(YearMonth.from(LocalDate.now())) }
     var showDetailSheet by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showDiaryDialog by remember { mutableStateOf(false) }
     var showPushDialog by remember { mutableStateOf(false) }
+    var showCheckInSettingsDialog by remember { mutableStateOf(false) }
     // 0 = 日历（日历网格 + 当天对话），1 = 纪念日（倒计时卡片）
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -164,6 +169,18 @@ fun CalendarPage(vm: CalendarVM = koinViewModel()) {
                 }
             }
 
+            // 当天打卡
+            item {
+                CheckInCard(
+                    items = checkInSettings.items,
+                    records = calendarData.getDay(selectedDate).checkIns,
+                    isToday = selectedDate == LocalDate.now(),
+                    onToggle = { vm.toggleCheckIn(it) },
+                    onUpdateNote = { id, note -> vm.updateCheckInNote(id, note) },
+                    onEditItems = { showCheckInSettingsDialog = true },
+                )
+            }
+
             // 当天对话（网格下方）
             item {
                 DayChatSection(
@@ -253,6 +270,15 @@ fun CalendarPage(vm: CalendarVM = koinViewModel()) {
             onDismiss = { showPushDialog = false },
         )
     }
+
+    // 打卡项目管理
+    if (showCheckInSettingsDialog) {
+        CheckInSettingsDialog(
+            settings = checkInSettings,
+            onSave = { vm.updateCheckInSettings(it) },
+            onDismiss = { showCheckInSettingsDialog = false },
+        )
+    }
 }
 
 @Composable
@@ -307,7 +333,7 @@ private fun DiarySettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 对话气泡上显示的名字。留空各自回落到「AI」「我」，
+                // 对话气泡上显示的名字。留空各自回落到「Moryne」「Rover」，
                 // 所以这里不做非空校验。
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -569,4 +595,180 @@ private fun createFileUri(context: Context, fileName: String): Uri? {
     } catch (e: Exception) {
         null
     }
+}
+
+@Composable
+private fun CheckInCard(
+    items: List<me.rerere.rikkahub.data.calendar.CheckInItem>,
+    records: List<me.rerere.rikkahub.data.calendar.CheckInRecord>,
+    isToday: Boolean,
+    onToggle: (String) -> Unit,
+    onUpdateNote: (String, String) -> Unit,
+    onEditItems: () -> Unit,
+) {
+    if (items.isEmpty()) return
+
+    var expandedItemId by remember { mutableStateOf<String?>(null) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "每日打卡",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                IconButton(onClick = onEditItems, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = HugeIcons.PencilEdit01,
+                        contentDescription = "编辑项目",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+            // PLACEHOLDER_CHECKIN_ITEMS
+            Spacer(modifier = Modifier.height(8.dp))
+            items.forEach { item ->
+                val record = records.find { it.itemId == item.id }
+                val completed = record?.completed == true
+                val note = record?.note.orEmpty()
+                val isExpanded = expandedItemId == item.id
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = completed,
+                        onCheckedChange = { if (isToday) onToggle(item.id) },
+                        enabled = isToday,
+                    )
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (isToday) Modifier.clickable {
+                                    expandedItemId = if (isExpanded) null else item.id
+                                } else Modifier
+                            ),
+                    )
+                    if (note.isNotBlank() && !isExpanded) {
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 120.dp),
+                        )
+                    }
+                }
+                // 展开时显示备注输入框
+                if (isExpanded && isToday) {
+                    var noteText by remember(item.id, note) { mutableStateOf(note) }
+                    OutlinedTextField(
+                        value = noteText,
+                        onValueChange = { noteText = it },
+                        label = { Text("备注") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 48.dp, bottom = 4.dp),
+                        singleLine = true,
+                        trailingIcon = {
+                            if (noteText != note) {
+                                TextButton(onClick = {
+                                    onUpdateNote(item.id, noteText)
+                                    expandedItemId = null
+                                }) { Text("保存") }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckInSettingsDialog(
+    settings: me.rerere.rikkahub.data.calendar.CheckInSettings,
+    onSave: (me.rerere.rikkahub.data.calendar.CheckInSettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var items by remember {
+        mutableStateOf(settings.items.map { it.id to it.name })
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("打卡项目") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items.forEachIndexed { index, (id, name) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { newName ->
+                                items = items.toMutableList().apply {
+                                    set(index, id to newName)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            placeholder = { Text("项目名称") },
+                        )
+                        IconButton(
+                            onClick = {
+                                items = items.toMutableList().apply { removeAt(index) }
+                            },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Delete01,
+                                contentDescription = "删除",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        items = items + (java.util.UUID.randomUUID().toString() to "")
+                    },
+                ) {
+                    Text("+ 添加项目")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val newItems = items
+                    .filter { it.second.isNotBlank() }
+                    .map { (id, name) ->
+                        me.rerere.rikkahub.data.calendar.CheckInItem(id = id, name = name)
+                    }
+                onSave(settings.copy(items = newItems))
+                onDismiss()
+            }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }

@@ -333,7 +333,7 @@ private fun DiarySettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 对话气泡上显示的名字。留空各自回落到「AI」「我」，
+                // 对话气泡上显示的名字。留空各自回落到「Moryne」「Rover」，
                 // 所以这里不做非空校验。
                 Row(
                     modifier = Modifier.fillMaxWidth(),

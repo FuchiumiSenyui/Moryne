@@ -20,6 +20,7 @@ class CalendarStore(context: Context) {
         val CALENDAR_DATA = stringPreferencesKey("calendar_data")
         val DIARY_SETTINGS = stringPreferencesKey("diary_settings")
         val PUSH_SETTINGS = stringPreferencesKey("push_settings")
+        val CHECK_IN_SETTINGS = stringPreferencesKey("check_in_settings")
     }
 
     val calendarDataFlow = dataStore.data
@@ -95,5 +96,26 @@ class CalendarStore(context: Context) {
 
     suspend fun getPushSettings(): PushSettings {
         return pushSettingsFlow.first()
+    }
+
+    // 打卡项目配置
+    val checkInSettingsFlow = dataStore.data
+        .map { preferences ->
+            val json = preferences[CHECK_IN_SETTINGS] ?: return@map CheckInSettings.DEFAULT
+            try {
+                JsonInstant.decodeFromString<CheckInSettings>(json)
+            } catch (e: Exception) {
+                CheckInSettings.DEFAULT
+            }
+        }
+
+    suspend fun saveCheckInSettings(settings: CheckInSettings) {
+        dataStore.edit { preferences ->
+            preferences[CHECK_IN_SETTINGS] = JsonInstant.encodeToString(settings)
+        }
+    }
+
+    suspend fun getCheckInSettings(): CheckInSettings {
+        return checkInSettingsFlow.first()
     }
 }

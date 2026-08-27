@@ -36,6 +36,10 @@ class CalendarVM(
     val pushSettings = calendarStore.pushSettingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, PushSettings.DEFAULT)
 
+    // 打卡项目配置
+    val checkInSettings = calendarStore.checkInSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CheckInSettings.DEFAULT)
+
     /** 正在生成回复 */
     private val _replying = MutableStateFlow(false)
     val replying = _replying.asStateFlow()
@@ -90,6 +94,54 @@ class CalendarVM(
         }
     }
 
+    fun updateCheckInSettings(settings: CheckInSettings) {
+        viewModelScope.launch {
+            calendarStore.saveCheckInSettings(settings)
+        }
+    }
+
+    /** 切换某个打卡项目的完成状态 */
+    fun toggleCheckIn(itemId: String) {
+        val date = _selectedDate.value
+        if (date != LocalDate.now()) return
+        viewModelScope.launch {
+            val dayData = _calendarData.value.getDay(date)
+            val existing = dayData.checkIns.find { it.itemId == itemId }
+            val updatedCheckIns = if (existing != null) {
+                dayData.checkIns.map {
+                    if (it.itemId == itemId) it.copy(completed = !it.completed) else it
+                }
+            } else {
+                dayData.checkIns + CheckInRecord(itemId = itemId, completed = true)
+            }
+            val updatedDay = dayData.copy(checkIns = updatedCheckIns)
+            val newData = _calendarData.value.updateDay(updatedDay)
+            _calendarData.value = newData
+            calendarStore.saveCalendarData(newData)
+        }
+    }
+
+    /** 更新某个打卡项目的备注 */
+    fun updateCheckInNote(itemId: String, note: String) {
+        val date = _selectedDate.value
+        if (date != LocalDate.now()) return
+        viewModelScope.launch {
+            val dayData = _calendarData.value.getDay(date)
+            val existing = dayData.checkIns.find { it.itemId == itemId }
+            val updatedCheckIns = if (existing != null) {
+                dayData.checkIns.map {
+                    if (it.itemId == itemId) it.copy(note = note) else it
+                }
+            } else {
+                dayData.checkIns + CheckInRecord(itemId = itemId, note = note)
+            }
+            val updatedDay = dayData.copy(checkIns = updatedCheckIns)
+            val newData = _calendarData.value.updateDay(updatedDay)
+            _calendarData.value = newData
+            calendarStore.saveCalendarData(newData)
+        }
+    }
+
     fun dismissReplyError() {
         _replyError.value = null
     }
@@ -138,12 +190,14 @@ class CalendarVM(
         _streamingReply.value = ""
         try {
             val settings = settingsStore.settingsFlow.first()
+            val checkIn = calendarStore.getCheckInSettings()
             var finalReply = ""
             diaryChatGenerator.reply(
                 settings = settings,
                 diarySettings = diary,
                 dayData = _calendarData.value.getDay(date),
                 fallbackModelId = settings.chatModelId,
+                checkInSettings = checkIn,
             ).collect { text ->
                 finalReply = text
                 _streamingReply.value = text

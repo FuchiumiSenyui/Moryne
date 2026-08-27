@@ -46,6 +46,8 @@ data class DayData(
     val annotation: DateAnnotation? = null, // 自定义标注
     /** 新话题起点：从这条消息的 createdAt 起才算当前上下文，之前的只保留可见 */
     val contextStartAt: String? = null,
+    /** 当日打卡记录 */
+    val checkIns: List<CheckInRecord> = emptyList(),
 
 ) {
     companion object {

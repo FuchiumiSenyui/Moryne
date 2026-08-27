@@ -62,8 +62,9 @@ class PushMessageGenerator(
         // 获取当天数据
         val calendarData = calendarStore.getCalendarData()
         val dayData = calendarData.getDay(date)
+        val checkInSettings = calendarStore.getCheckInSettings()
 
-        var messages = buildMessages(pushSettings, dayData, scheduledTime, actualTime, isCatchUp)
+        var messages = buildMessages(pushSettings, dayData, scheduledTime, actualTime, isCatchUp, checkInSettings)
         var reply = ""
 
         // 推送场景强制只读：写入动作会绕过推送防重，导致同一条推送重复进日历
@@ -115,6 +116,7 @@ class PushMessageGenerator(
         scheduledTime: LocalDateTime,
         actualTime: LocalDateTime,
         isCatchUp: Boolean,
+        checkInSettings: CheckInSettings,
     ): List<UIMessage> {
         val result = mutableListOf<UIMessage>()
 
@@ -124,7 +126,7 @@ class PushMessageGenerator(
                 appendLine()
             }
             
-            appendLine(buildDayContext(dayData, scheduledTime, actualTime, isCatchUp))
+            appendLine(buildDayContext(dayData, scheduledTime, actualTime, isCatchUp, checkInSettings))
         }.trim()
 
         result.add(UIMessage.system(systemPrompt))
@@ -155,6 +157,7 @@ class PushMessageGenerator(
         scheduledTime: LocalDateTime,
         actualTime: LocalDateTime,
         isCatchUp: Boolean = false,
+        checkInSettings: CheckInSettings,
     ): String = buildString {
         val date = runCatching { dayData.localDate() }.getOrElse { LocalDate.now() }
         val now = LocalDateTime.now()
@@ -193,6 +196,19 @@ class PushMessageGenerator(
                 appendLine("今日标注：${annotation.title}${
                     if (annotation.note.isNotBlank()) "（${annotation.note}）" else ""
                 }")
+            }
+        }
+
+        // 打卡状态
+        if (checkInSettings.items.isNotEmpty()) {
+            appendLine()
+            appendLine("## 每日项目")
+            checkInSettings.items.forEach { item ->
+                val record = dayData.checkIns.find { it.itemId == item.id }
+                val status = if (record?.completed == true) "已完成" else "未完成"
+                val note = record?.note?.takeIf { it.isNotBlank() }
+                val noteText = if (note != null) "（备注：$note）" else ""
+                appendLine("- ${item.name}：$status$noteText")
             }
         }
     }
